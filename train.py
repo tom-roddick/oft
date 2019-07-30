@@ -150,12 +150,7 @@ def compute_loss(pred_encoded, gt_encoded, loss_weights=[1., 1., 1., 1.]):
     score_weight, pos_weight, dim_weight, ang_weight = loss_weights
 
     # Compute losses
-    # score_loss = hard_neg_mining_loss(score, labels)
-    # score_loss = huber_loss(score, labels.float())
     score_loss = oft.model.loss.balanced_cross_entropy_loss(score, labels)
-    # # score_loss = oft.model.loss.heatmap_loss(score, labels, pos_weight=100)
-    # score_loss = oft.model.loss.uncertainty_loss(score, sqr_dists)
-    # # score_loss = oft.model.loss.log_ap_loss(score, sqr_dists)
 
     pos_loss = huber_loss(pos_offsets, gt_pos_offsets, labels.unsqueeze(2))
     dim_loss = huber_loss(dim_offsets, gt_dim_offsets, labels.unsqueeze(2))
