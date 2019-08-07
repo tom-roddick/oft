@@ -4,7 +4,6 @@ import torch.nn.functional as F
 
 from . import resnet
 from .oft import OFT
-from .edoft import ExplicitDepthOFT
 
 class OftNet(nn.Module):
 
