@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 
 import oft
-from oft import OftNet, KittiObjectDataset, MetricDict, huber_loss, hard_neg_mining_loss, ObjectEncoder
+from oft import OftNet, KittiObjectDataset, MetricDict, huber_loss, ObjectEncoder
 
 def train(args, dataloader, model, encoder, optimizer, summary, epoch):
     
@@ -75,7 +75,7 @@ def train(args, dataloader, model, encoder, optimizer, summary, epoch):
 
             # Visualize scores
             summary.add_figure('train/score', 
-                visualize_score(pred_encoded, gt_encoded, grid), epoch)
+                visualize_score(pred_encoded[0], gt_encoded[0], grid), epoch)
         
         # TODO decode and save results        
 
@@ -121,7 +121,7 @@ def validate(args, dataloader, model, encoder, summary, epoch):
 
             # Visualize scores
             summary.add_figure('val/score', 
-                visualize_score(pred_encoded, gt_encoded, grid), epoch)
+                visualize_score(pred_encoded[0], gt_encoded[0], grid), epoch)
             
         # TODO decode and save results
 
@@ -138,15 +138,14 @@ def compute_loss(pred_encoded, gt_encoded, loss_weights=[1., 1., 1., 1.]):
 
     # Expand tuples
     score, pos_offsets, dim_offsets, ang_offsets = pred_encoded
-    labels, sqr_dists, gt_pos_offsets, gt_dim_offsets, gt_ang_offsets = gt_encoded
+    heatmaps, gt_pos_offsets, gt_dim_offsets, gt_ang_offsets, mask = gt_encoded
     score_weight, pos_weight, dim_weight, ang_weight = loss_weights
 
     # Compute losses
-    score_loss = oft.model.loss.balanced_cross_entropy_loss(score, labels)
-
-    pos_loss = huber_loss(pos_offsets, gt_pos_offsets, labels.unsqueeze(2))
-    dim_loss = huber_loss(dim_offsets, gt_dim_offsets, labels.unsqueeze(2))
-    ang_loss = huber_loss(ang_offsets, gt_ang_offsets, labels.unsqueeze(2))
+    score_loss = huber_loss(score, heatmaps)
+    pos_loss = huber_loss(pos_offsets, gt_pos_offsets, mask.unsqueeze(2))
+    dim_loss = huber_loss(dim_offsets, gt_dim_offsets, mask.unsqueeze(2))
+    ang_loss = huber_loss(ang_offsets, gt_ang_offsets, mask.unsqueeze(2))
 
     # Combine loss
     total_loss = score_loss * score_weight + pos_loss * pos_weight \
@@ -166,18 +165,14 @@ def compute_loss(pred_encoded, gt_encoded, loss_weights=[1., 1., 1., 1.]):
 def visualize_image(image):
     return image[0].cpu().detach()
 
-def visualize_score(preds, targets, grid):
-
-    # Expand tuples
-    score, pos_offsets, dim_offsets, ang_offsets = preds
-    labels, sqr_dists, gt_pos_offsets, gt_dim_offsets, gt_ang_offsets = targets
+def visualize_score(scores, heatmaps, grid):
 
     # Visualize score
     fig_score = plt.figure(num='score', figsize=(8, 6))
     fig_score.clear()
-    # oft.vis_score(score[0, 0], grid[0], ax=plt.subplot(121))
-    oft.vis_score(score[0, 0].sigmoid(), grid[0], ax=plt.subplot(121))
-    oft.vis_score(labels[0, 0].float(), grid[0], ax=plt.subplot(122))
+
+    oft.vis_score(scores[0, 0], grid[0], ax=plt.subplot(121))
+    oft.vis_score(heatmaps[0, 0], grid[0], ax=plt.subplot(122))
 
     return fig_score
 
@@ -326,8 +321,9 @@ def main():
         num_workers=args.workers,collate_fn=oft.utils.collate)
 
     # Build model
-    model = OftNet(frontend=args.frontend, topdown_layers=args.topdown,
-                   grid_res=args.grid_res, grid_height=args.grid_height)
+    model = OftNet(num_classes=1, frontend=args.frontend, 
+                   topdown_layers=args.topdown, grid_res=args.grid_res, 
+                   grid_height=args.grid_height)
     if len(args.gpu) > 0:
         torch.cuda.set_device(args.gpu[0])
         model = nn.DataParallel(model, args.gpu).cuda()

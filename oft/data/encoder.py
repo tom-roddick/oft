@@ -6,13 +6,14 @@ class ObjectEncoder(object):
 
     def __init__(self, classnames=['Car'], pos_std=[.5, .36, .5], 
                  log_dim_mean=[[0.42, 0.48, 1.35]], 
-                 log_dim_std=[[.085, .067, .115]]):
+                 log_dim_std=[[.085, .067, .115]], sigma=1.):
         
         self.classnames = classnames
         self.nclass = len(classnames)
         self.pos_std = pos_std
         self.log_dim_mean = log_dim_mean
         self.log_dim_std = log_dim_std
+        self.sigma = sigma
         
     
     def encode_batch(self, objects, grids):
@@ -22,13 +23,7 @@ class ObjectEncoder(object):
                          in zip(objects, grids)]
         
         # Transpose batch
-        # labels, pos_offsets, dim_offsets, ang_offsets = zip(*batch_encoded)
-        # return torch.stack(labels), torch.stack(pos_offsets), \
-        #     torch.stack(dim_offsets), torch.stack(ang_offsets)
-        labels, sqr_dists, pos_offsets, dim_offsets, ang_offsets = zip(*batch_encoded)
-        return torch.stack(labels), torch.stack(sqr_dists), torch.stack(pos_offsets), \
-            torch.stack(dim_offsets), torch.stack(ang_offsets)
-
+        return [torch.stack(t) for t in zip(*batch_encoded)]
 
 
     def encode(self, objects, grid):
@@ -48,17 +43,19 @@ class ObjectEncoder(object):
         angles = grid.new([obj.angle for obj in objects])
 
         # Assign objects to locations on the grid
-        labels, indices = self._assign_to_grid(
+        _, indices = self._assign_to_grid(
             classids, positions, dimensions, angles, grid)
+        mask = indices >= 0
 
-        sqr_dists = self._encode_distances(classids, positions, grid)
+        # Encode object heatmaps
+        heatmaps = self._encode_heatmaps(classids, positions, grid)
         
         # Encode positions, dimensions and angles
         pos_offsets = self._encode_positions(positions, indices, grid)
         dim_offsets = self._encode_dimensions(classids, dimensions, indices)
         ang_offsets = self._encode_angles(angles, indices)
 
-        return labels, sqr_dists, pos_offsets, dim_offsets, ang_offsets   
+        return heatmaps, pos_offsets, dim_offsets, ang_offsets, mask   
     
 
     def _assign_to_grid(self, classids, positions, dimensions, angles, grid):
@@ -82,21 +79,23 @@ class ObjectEncoder(object):
         labels, indices = torch.max(class_inside, dim=0)
         return labels, indices
     
-    def _encode_distances(self, classids, positions, grid):
+
+    def _encode_heatmaps(self, classids, positions, grid):
 
         centers = (grid[1:, 1:, [0, 2]] + grid[:-1, :-1, [0, 2]]) / 2.
         positions = positions.view(-1, 1, 1, 3)[..., [0, 2]]
 
-        # Compute squared distances
-        obj_sqr_dists = (positions - centers).pow(2).sum(dim=-1)
-        sqr_dists, _ = obj_sqr_dists.min(dim=0)
+        # Compute per-object heatmaps
+        sqr_dists = (positions - centers).pow(2).sum(dim=-1) 
+        obj_heatmaps = torch.exp(-0.5 * sqr_dists / self.sigma ** 2)
 
-        # Normalize by grid resolution
-        sigma0 = (grid[1:, 1:, [0, 2]] - grid[:-1, :-1, [0, 2]] / 2.).pow(2).sum(-1) / 4.
-        sqr_dists = sqr_dists / sigma0
+        heatmaps = obj_heatmaps.new_zeros(self.nclass, *obj_heatmaps.size()[1:])
+        for i in range(self.nclass):
+            mask = classids == i
+            if mask.any():
+                heatmaps[i] = torch.max(obj_heatmaps[mask], dim=0)[0]
 
-        # TODO handle classes correctly
-        return sqr_dists.unsqueeze(0)
+        return heatmaps
 
     
 
@@ -138,34 +137,13 @@ class ObjectEncoder(object):
 
     def _encode_empty(self, grid):
         depth, width, _ = grid.size()
-        max_dist = math.sqrt(depth ** 2 + width ** 2)
 
         # Generate empty tensors
-        labels = grid.new_zeros((self.nclass, depth-1, width-1)).byte()
-        sqr_dists = grid.new_full((self.nclass, depth-1, width-1), max_dist)
+        heatmaps = grid.new_zeros((self.nclass, depth-1, width-1))
         pos_offsets = grid.new_zeros((self.nclass, 3, depth-1, width-1))
         dim_offsets = grid.new_zeros((self.nclass, 3, depth-1, width-1))
         ang_offsets = grid.new_zeros((self.nclass, 2, depth-1, width-1))
+        mask = grid.new_zeros((self.nclass, depth-1, width-1)).byte()
         
-        return labels, sqr_dists, pos_offsets, dim_offsets, ang_offsets
-
-
-def _make_subgrid(grid, n_points=4):
-
-    # Construct subgrid
-    offset = 1. / (2 * n_points)
-    pts = torch.linspace(offset, 1-offset, n_points, out=grid.new(n_points))
-    y, x = torch.meshgrid(pts, pts)
-
-    # Add dimensions to enable broadcasting
-    y = y.unsqueeze(-1)
-    x = x.unsqueeze(-1)
-    grid = grid.unsqueeze(-2).unsqueeze(-3)
-
-    # Subdivide grid
-    subgrid = grid[:-1, :-1] * (1 - x) * (1 - y) + grid[1:, :-1] * x * (1 - y) \
-        + grid[:-1, 1:] * (1 - x) * y + grid[1:, 1:] * x * y
-    
-    return subgrid
-
+        return heatmaps, pos_offsets, dim_offsets, ang_offsets, mask
 
