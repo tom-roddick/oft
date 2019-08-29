@@ -89,6 +89,16 @@ def make_grid(grid_size, grid_offset, grid_res):
     return torch.stack([xx, torch.full_like(xx, yoff), zz], dim=-1)
 
 
+def gaussian_kernel(sigma=1., trunc=2.):
+
+    width = round(trunc * sigma)
+    x = torch.arange(-width, width+1).float() / sigma
+    kernel1d = torch.exp(-0.5 * x ** 2)
+    kernel2d = kernel1d.view(1, -1) * kernel1d.view(-1, 1)
+
+    return kernel2d / kernel2d.sum()
+
+
 def collate(batch):
 
     idxs, images, calibs, objects, grids = zip(*batch)

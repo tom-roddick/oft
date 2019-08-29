@@ -1,19 +1,22 @@
 import math
 import torch
+import torch.nn.functional as F
 from .. import utils
 
 class ObjectEncoder(object):
 
     def __init__(self, classnames=['Car'], pos_std=[.5, .36, .5], 
                  log_dim_mean=[[0.42, 0.48, 1.35]], 
-                 log_dim_std=[[.085, .067, .115]], sigma=1.):
+                 log_dim_std=[[.085, .067, .115]], sigma=1., nms_thresh=0.05):
         
         self.classnames = classnames
         self.nclass = len(classnames)
-        self.pos_std = pos_std
-        self.log_dim_mean = log_dim_mean
-        self.log_dim_std = log_dim_std
+        self.pos_std = torch.tensor(pos_std)
+        self.log_dim_mean = torch.tensor(log_dim_mean)
+        self.log_dim_std = torch.tensor(log_dim_std)
+
         self.sigma = sigma
+        self.nms_thresh = nms_thresh
         
     
     def encode_batch(self, objects, grids):
@@ -109,14 +112,14 @@ class ObjectEncoder(object):
         positions = positions.index_select(0, indices.view(-1)).view(C, D, W, 3)
 
         # Compute relative offsets and normalize
-        pos_offsets = (positions - centers) / grid.new_tensor(self.pos_std)
+        pos_offsets = (positions - centers) / self.pos_std
         return pos_offsets.permute(0, 3, 1, 2)
     
     def _encode_dimensions(self, classids, dimensions, indices):
         
         # Convert mean and std to tensors
-        log_dim_mean = dimensions.new_tensor(self.log_dim_mean)[classids]
-        log_dim_std = dimensions.new_tensor(self.log_dim_std)[classids]
+        log_dim_mean = self.log_dim_mean[classids]
+        log_dim_std = self.log_dim_std[classids]
 
         # Compute normalized log scale offset
         dim_offsets = (torch.log(dimensions) - log_dim_mean) / log_dim_std
@@ -146,4 +149,76 @@ class ObjectEncoder(object):
         mask = grid.new_zeros((self.nclass, depth-1, width-1)).byte()
         
         return heatmaps, pos_offsets, dim_offsets, ang_offsets, mask
+    
 
+    def decode(self, heatmaps, pos_offsets, dim_offsets, ang_offsets, grid):
+        
+        # Apply NMS to find positive heatmap locations
+        peaks, scores, classids = self._decode_heatmaps(heatmaps)
+
+        # Decode positions, dimensions and rotations
+        positions = self._decode_positions(pos_offsets, peaks, grid)
+        dimensions = self._decode_dimensions(dim_offsets, peaks)
+        angles = self._decode_angles(ang_offsets, peaks)
+
+        objects = list()
+        for score, cid, pos, dim, ang in zip(scores, classids, positions, 
+                                             dimensions, angles):
+            objects.append(utils.ObjectData(
+                self.classnames[cid], pos, dim, ang, score))
+        
+        return objects
+
+    def _decode_heatmaps(self, heatmaps):
+        peaks = non_maximum_suppression(heatmaps, self.sigma)
+        scores = heatmaps[peaks]
+        classids = torch.nonzero(peaks)[:, 0]
+        return peaks, scores, classids
+
+
+    def _decode_positions(self, pos_offsets, peaks, grid):
+
+        # Compute the center of each grid cell
+        centers = (grid[1:, 1:] + grid[:-1, :-1]) / 2.
+
+        # Un-normalize grid offsets
+        positions = pos_offsets.permute(0, 2, 3, 1) * self.pos_std + centers
+        return positions[peaks]
+    
+    def _decode_dimensions(self, dim_offsets, peaks):
+        dim_offsets = dim_offsets.permute(0, 2, 3, 1)
+        dimensions = torch.exp(
+            dim_offsets * self.log_dim_std + self.log_dim_mean)
+        return dimensions[peaks]
+    
+    def _decode_angles(self, angle_offsets, peaks):
+        cos, sin = torch.unbind(angle_offsets, 1)
+        return torch.atan2(sin, cos)[peaks]
+
+
+
+def non_maximum_suppression(heatmaps, sigma=1.0, thresh=0.05, max_peaks=50):
+    
+    # Smooth with a Gaussian kernel
+    num_class = heatmaps.size(0)
+    kernel = utils.gaussian_kernel(sigma).to(heatmaps)
+    kernel = kernel.expand(num_class, num_class, -1, -1)
+    smoothed = F.conv2d(
+        heatmaps[None], kernel, padding=int((kernel.size(2)-1)/2))
+
+    # Max pool over the heatmaps
+    max_inds = F.max_pool2d(smoothed, 3, stride=1, padding=1, 
+                               return_indices=True)[1].squeeze(0)
+
+    # Find the pixels which correspond to the maximum indices
+    _, height, width = heatmaps.size()
+    flat_inds = torch.arange(height*width).type_as(max_inds).view(height, width)
+    peaks = (flat_inds == max_inds) & (heatmaps > thresh)
+    
+    # Keep only the top N peaks
+    if peaks.long().sum() > max_peaks:
+        scores = heatmaps[peaks]
+        scores, _ = torch.sort(scores, descending=True)
+        peaks = peaks & (heatmaps > scores[max_peaks-1])
+    
+    return peaks
