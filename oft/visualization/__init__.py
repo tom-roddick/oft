@@ -5,6 +5,7 @@ from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
 
 from .encoded import vis_score, vis_uncertainty
+from .bbox import visualize_objects
 
 # def vis_score(scores, labels, ax=None):
 #     scores = scores.sigmoid().cpu().detach().numpy()

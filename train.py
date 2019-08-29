@@ -188,7 +188,7 @@ def parse_args():
                         help='width and depth of validation grid, in meters')
     parser.add_argument('--train-grid-size', type=int, nargs=2, 
                         default=(120, 120),
-                        help='width and depth of training grid, in meters')
+                        help='width and depth of training grid, in pixels')
     parser.add_argument('--grid-jitter', type=float, nargs=3, 
                         default=[.25, .5, .25],
                         help='magn. of random noise applied to grid coords')
