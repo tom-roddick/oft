@@ -181,8 +181,7 @@ def parse_args():
     parser = ArgumentParser()
 
     # Data options
-    parser.add_argument('--root', type=str, 
-                        default='data/kitti',
+    parser.add_argument('--root', type=str, default='data/kitti',
                         help='root directory of the KITTI dataset')
     parser.add_argument('--grid-size', type=float, nargs=2, default=(80., 80.),
                         help='width and depth of validation grid, in meters')

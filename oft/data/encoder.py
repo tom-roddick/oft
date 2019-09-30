@@ -112,14 +112,14 @@ class ObjectEncoder(object):
         positions = positions.index_select(0, indices.view(-1)).view(C, D, W, 3)
 
         # Compute relative offsets and normalize
-        pos_offsets = (positions - centers) / self.pos_std
+        pos_offsets = (positions - centers) / self.pos_std.to(positions)
         return pos_offsets.permute(0, 3, 1, 2)
     
     def _encode_dimensions(self, classids, dimensions, indices):
         
         # Convert mean and std to tensors
-        log_dim_mean = self.log_dim_mean[classids]
-        log_dim_std = self.log_dim_std[classids]
+        log_dim_mean = self.log_dim_mean.to(dimensions)[classids]
+        log_dim_std = self.log_dim_std.to(dimensions)[classids]
 
         # Compute normalized log scale offset
         dim_offsets = (torch.log(dimensions) - log_dim_mean) / log_dim_std
@@ -146,7 +146,7 @@ class ObjectEncoder(object):
         pos_offsets = grid.new_zeros((self.nclass, 3, depth-1, width-1))
         dim_offsets = grid.new_zeros((self.nclass, 3, depth-1, width-1))
         ang_offsets = grid.new_zeros((self.nclass, 2, depth-1, width-1))
-        mask = grid.new_zeros((self.nclass, depth-1, width-1)).byte()
+        mask = grid.new_zeros((self.nclass, depth-1, width-1)).bool()
         
         return heatmaps, pos_offsets, dim_offsets, ang_offsets, mask
     
