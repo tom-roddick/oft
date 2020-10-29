@@ -46,9 +46,8 @@ class ObjectEncoder(object):
         angles = grid.new([obj.angle for obj in objects])
 
         # Assign objects to locations on the grid
-        _, indices = self._assign_to_grid(
+        mask, indices = self._assign_to_grid(
             classids, positions, dimensions, angles, grid)
-        mask = indices >= 0
 
         # Encode object heatmaps
         heatmaps = self._encode_heatmaps(classids, positions, grid)
