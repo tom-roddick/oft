@@ -158,7 +158,6 @@ def compute_loss(pred_encoded, gt_encoded, loss_weights=[1., 1., 1., 1.]):
         'total' : float(total_loss) 
     }
 
-    total_loss = score_loss
     return total_loss, loss_dict
 
 
