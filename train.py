@@ -76,6 +76,13 @@ def train(args, dataloader, model, encoder, optimizer, summary, epoch):
             # Visualize scores
             summary.add_figure('train/score', 
                 visualize_score(pred_encoded[0], gt_encoded[0], grid), epoch)
+            
+            # Decode predictions
+            preds = encoder.decode_batch(*pred_encoded, grid)
+
+            # Visualise bounding boxes
+            summary.add_figure('train/bboxes',
+                visualise_bboxes(image, calib, objects, preds), epoch)
         
         # TODO decode and save results        
 
@@ -113,6 +120,9 @@ def validate(args, dataloader, model, encoder, summary, epoch):
                 pred_encoded, gt_encoded, args.loss_weights)       
             epoch_loss += loss_dict
         
+            # Decode predictions
+            preds = encoder.decode_batch(*pred_encoded, grid)
+        
         # Visualize predictions
         if i % args.vis_iter == 0:
 
@@ -123,7 +133,11 @@ def validate(args, dataloader, model, encoder, summary, epoch):
             summary.add_figure('val/score', 
                 visualize_score(pred_encoded[0], gt_encoded[0], grid), epoch)
             
-        # TODO decode and save results
+            # Visualise bounding boxes
+            summary.add_figure('val/bboxes',
+                visualise_bboxes(image, calib, objects, preds), epoch)
+            
+        
 
     # TODO evaluate
     
@@ -174,6 +188,22 @@ def visualize_score(scores, heatmaps, grid):
     oft.vis_score(heatmaps[0, 0], grid[0], ax=plt.subplot(122))
 
     return fig_score
+
+def visualise_bboxes(image, calib, objects, preds):
+
+    fig = plt.figure(num='bbox', figsize=(8, 6))
+    fig.clear()
+    ax1 = plt.subplot(211)
+    ax2 = plt.subplot(212)
+
+    oft.visualize_objects(image[0], calib[0], preds[0], ax=ax1)
+    ax1.set_title('Predictions')
+
+    oft.visualize_objects(image[0], calib[0], objects[0], ax=ax2)
+    ax2.set_title('Ground truth')
+
+    return fig
+
 
 
 def parse_args():

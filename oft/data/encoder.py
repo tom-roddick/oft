@@ -167,12 +167,24 @@ class ObjectEncoder(object):
                 self.classnames[cid], pos, dim, ang, score))
         
         return objects
+    
+
+    def decode_batch(self, heatmaps, pos_offsets, dim_offsets, ang_offsets, 
+                     grids):
+        
+        boxes = list()
+        for hmap, pos_off, dim_off, ang_off, grid in zip(heatmaps, pos_offsets, 
+                                                         dim_offsets, 
+                                                         ang_offsets, grids):
+            boxes.append(self.decode(hmap, pos_off, dim_off, ang_off, grid))
+        
+        return boxes
 
     def _decode_heatmaps(self, heatmaps):
         peaks = non_maximum_suppression(heatmaps, self.sigma)
         scores = heatmaps[peaks]
         classids = torch.nonzero(peaks)[:, 0]
-        return peaks, scores, classids
+        return peaks, scores.cpu(), classids.cpu()
 
 
     def _decode_positions(self, pos_offsets, peaks, grid):
@@ -181,18 +193,20 @@ class ObjectEncoder(object):
         centers = (grid[1:, 1:] + grid[:-1, :-1]) / 2.
 
         # Un-normalize grid offsets
-        positions = pos_offsets.permute(0, 2, 3, 1) * self.pos_std + centers
-        return positions[peaks]
+        positions = pos_offsets.permute(0, 2, 3, 1) * self.pos_std.to(grid) \
+            + centers
+        return positions[peaks].cpu()
     
     def _decode_dimensions(self, dim_offsets, peaks):
         dim_offsets = dim_offsets.permute(0, 2, 3, 1)
         dimensions = torch.exp(
-            dim_offsets * self.log_dim_std + self.log_dim_mean)
-        return dimensions[peaks]
+            dim_offsets * self.log_dim_std.to(dim_offsets) \
+                + self.log_dim_mean.to(dim_offsets))
+        return dimensions[peaks].cpu()
     
     def _decode_angles(self, angle_offsets, peaks):
         cos, sin = torch.unbind(angle_offsets, 1)
-        return torch.atan2(sin, cos)[peaks]
+        return torch.atan2(sin, cos)[peaks].cpu()
 
 
 
