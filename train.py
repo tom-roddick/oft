@@ -279,6 +279,8 @@ def _make_experiment(args):
     
     
 def save_checkpoint(args, epoch, model, optimizer, scheduler):
+
+    model = model.module if isinstance(model, nn.DataParallel) else model
     ckpt = {
         'epoch' : epoch,
         'model' : model.state_dict(),
