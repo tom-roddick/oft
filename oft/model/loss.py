@@ -51,13 +51,24 @@ def balanced_cross_entropy_loss(scores, labels):
     return F.binary_cross_entropy_with_logits(scores, labels, weights)
 
 
-def heatmap_loss(scores, labels, pos_weight=100):
-    labels = labels.float()
-    # loss = F.binary_cross_entropy_with_logits(scores, labels, reduction='none')
-    loss = F.l1_loss(scores, labels, reduction='none')
-    weighted = loss * (1. + (pos_weight - 1.) * labels)
+# def heatmap_loss(scores, labels, thresh=0.05, pos_weight=100):
+#     labels = labels.float()
+#     mask = (labels > thresh).float()
+#     loss = F.l1_loss(scores, labels, reduction='none')
+#     weighted = loss * (1. + (pos_weight - 1.) * mask)
 
-    return weighted.sum()
+#     return weighted.sum()
+
+
+def heatmap_loss(heatmap, gt_heatmap, weights=[100], thresh=0.05):
+    
+    positives = (gt_heatmap > thresh).float()
+    weights = heatmap.new(weights).view(1, -1, 1, 1)
+
+    loss = F.l1_loss(heatmap, gt_heatmap, reduce=False)
+    
+    loss *= positives * weights + (1 - positives)
+    return loss.sum()
 
 
 # def uncertainty_loss(logvar, sqr_dists):

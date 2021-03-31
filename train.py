@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 
 import oft
-from oft import OftNet, KittiObjectDataset, MetricDict, huber_loss, ObjectEncoder
+from oft import OftNet, KittiObjectDataset, MetricDict, masked_l1_loss, heatmap_loss, ObjectEncoder
 
 def train(args, dataloader, model, encoder, optimizer, summary, epoch):
     
@@ -142,10 +142,10 @@ def compute_loss(pred_encoded, gt_encoded, loss_weights=[1., 1., 1., 1.]):
     score_weight, pos_weight, dim_weight, ang_weight = loss_weights
 
     # Compute losses
-    score_loss = huber_loss(score, heatmaps)
-    pos_loss = huber_loss(pos_offsets, gt_pos_offsets, mask.unsqueeze(2))
-    dim_loss = huber_loss(dim_offsets, gt_dim_offsets, mask.unsqueeze(2))
-    ang_loss = huber_loss(ang_offsets, gt_ang_offsets, mask.unsqueeze(2))
+    score_loss = heatmap_loss(score, heatmaps)
+    pos_loss = masked_l1_loss(pos_offsets, gt_pos_offsets, mask.unsqueeze(2))
+    dim_loss = masked_l1_loss(dim_offsets, gt_dim_offsets, mask.unsqueeze(2))
+    ang_loss = masked_l1_loss(ang_offsets, gt_ang_offsets, mask.unsqueeze(2))
 
     # Combine loss
     total_loss = score_loss * score_weight + pos_loss * pos_weight \
@@ -208,7 +208,7 @@ def parse_args():
                         help='number of residual blocks in topdown network')
     
     # Optimization options
-    parser.add_argument('-l', '--lr', type=float, default=1e-7,
+    parser.add_argument('-l', '--lr', type=float, default=1e-9,
                         help='learning rate')
     parser.add_argument('--momentum', type=float, default=0.9,
                         help='momentum for SGD')
@@ -238,7 +238,7 @@ def parse_args():
                         help='ids of gpus to train on. Leave empty to use cpu')
     parser.add_argument('-w', '--workers', type=int, default=4,
                         help='number of worker threads to use for data loading')
-    parser.add_argument('--val-interval', type=int, default=10,
+    parser.add_argument('--val-interval', type=int, default=5,
                         help='number of epochs between validation runs')
     parser.add_argument('--print-iter', type=int, default=10,
                         help='print loss summary every N iterations')
@@ -308,9 +308,9 @@ def main():
         args.root, 'val', args.grid_size, args.grid_res, args.yoffset)
     
     # Apply data augmentation
-    # train_data = oft.AugmentedObjectDataset(
-    #     train_data, args.train_image_size, args.train_grid_size, 
-    #     jitter=args.grid_jitter)
+    train_data = oft.AugmentedObjectDataset(
+        train_data, args.train_image_size, args.train_grid_size, 
+        jitter=args.grid_jitter)
 
     # Create dataloaders
     train_loader = DataLoader(train_data, args.batch_size, shuffle=True, 
